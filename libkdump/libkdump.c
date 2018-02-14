@@ -44,10 +44,9 @@ static libkdump_config_t config;
 
 // ---------------------------------------------------------------------------
 #define meltdown                                                               \
-  asm volatile("xorq %%rax, %%rax\n"                                           \
-               "1:\n"                                                          \
+  asm volatile("1:\n"                                                          \
                "movq (%%rsi), %%rsi\n"                                         \
-               "movb (%%rcx), %%al\n"                                          \
+               "movzx (%%rcx), %%rax\n"                                         \
                "shl $12, %%rax\n"                                              \
                "jz 1b\n"                                                       \
                "movq (%%rbx,%%rax,1), %%rbx\n"                                 \
@@ -57,9 +56,8 @@ static libkdump_config_t config;
 
 // ---------------------------------------------------------------------------
 #define meltdown_nonull                                                        \
-  asm volatile("xorq %%rax, %%rax\n"                                           \
-               "1:\n"                                                          \
-               "movb (%%rcx), %%al\n"                                          \
+  asm volatile("1:\n"                                                          \
+               "movzx (%%rcx), %%rax\n"                                         \
                "shl $12, %%rax\n"                                              \
                "jz 1b\n"                                                       \
                "movq (%%rbx,%%rax,1), %%rbx\n"                                 \
@@ -69,8 +67,7 @@ static libkdump_config_t config;
 
 // ---------------------------------------------------------------------------
 #define meltdown_fast                                                          \
-  asm volatile("xorq %%rax, %%rax\n"                                           \
-               "movb (%%rcx), %%al\n"                                          \
+  asm volatile("movzx (%%rcx), %%rax\n"                                         \
                "shl $12, %%rax\n"                                              \
                "movq (%%rbx,%%rax,1), %%rbx\n"                                 \
                :                                                               \
@@ -81,35 +78,32 @@ static libkdump_config_t config;
 
 // ---------------------------------------------------------------------------
 #define meltdown                                                               \
- asm volatile("xor %%eax, %%eax\n"                                            \
-              "1:\n"                                                           \
+ asm volatile("1:\n"                                                           \
               "movl (%%esi), %%esi\n"                                          \
-              "movb (%%ecx), %%al\n"                                           \
+              "movzx (%%ecx), %%eax\n"                                          \
               "shl $12, %%eax\n"                                               \
               "jz 1b\n"                                                        \
-              "mov (%%ebx,%%eax,1), %%ebx\n"                                  \
+              "mov (%%ebx,%%eax,1), %%ebx\n"                                   \
               :                                                                \
               : "c"(phys), "b"(mem), "S"(0)                                    \
               : "eax");
 
 // ---------------------------------------------------------------------------
 #define meltdown_nonull                                                        \
-  asm volatile("xor %%eax, %%eax\n"                                           \
-               "1:\n"                                                          \
-               "movb (%%ecx), %%al\n"                                          \
+  asm volatile("1:\n"                                                          \
+               "movzx (%%ecx), %%eax\n"                                         \
                "shl $12, %%eax\n"                                              \
                "jz 1b\n"                                                       \
-               "mov (%%ebx,%%eax,1), %%ebx\n"                                 \
+               "mov (%%ebx,%%eax,1), %%ebx\n"                                  \
                :                                                               \
                : "c"(phys), "b"(mem)                                           \
                : "eax");
 
 // ---------------------------------------------------------------------------
 #define meltdown_fast                                                          \
-  asm volatile("xor %%eax, %%eax\n"                                           \
-               "movb (%%ecx), %%al\n"                                          \
+  asm volatile("movzx (%%ecx), %%eax\n"                                         \
                "shl $12, %%eax\n"                                              \
-               "mov (%%ebx,%%eax,1), %%ebx\n"                                 \
+               "mov (%%ebx,%%eax,1), %%ebx\n"                                  \
                :                                                               \
                : "c"(phys), "b"(mem)                                           \
                : "eax");
@@ -412,8 +406,9 @@ int libkdump_init(const libkdump_config_t configuration) {
       int k;
       for (k = 0; k < j; k++) {
         pthread_cancel(load_thread[k]);
-        free(_mem);
       }
+      free(load_thread);
+      free(_mem);
       errno = r;
       return -1;
     }
@@ -449,6 +444,18 @@ int libkdump_cleanup() {
 
 // ---------------------------------------------------------------------------
 size_t libkdump_phys_to_virt(size_t addr) {
+  /* we are given full address (kernel or physical) here */
+  if (addr + config.physical_offset < config.physical_offset)
+    return addr;
+
+#ifdef __x86_64__
+  /* address given is bigger than identity mapping 64TB  */
+  if (addr >= (64ULL * 1024ULL * 1024ULL * 1024ULL * 1024ULL)) {
+    debug(ERROR, "phys_to_virt argument is > 64 TB\n");
+    return -1ULL;
+  }
+#endif
+
   return addr + config.physical_offset;
 }
 
